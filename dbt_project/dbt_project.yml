@@ -1,0 +1,21 @@
+name: 'ec_dwh'
+version: '1.0.0'
+profile: 'ec_dwh'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  ec_dwh:
+    staging:
+      +materialized: view
+    mart:
+      +materialized: table
