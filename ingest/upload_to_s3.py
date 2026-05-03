@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BUCKET = "ec-dwh-main"
-RAW_PREFIX = 'bronze/olist'
+RAW_PREFIX = 'raw/olist'
 LOCAL_DIR  = Path('./.data/raw')
 
 def upload_to_s3():
