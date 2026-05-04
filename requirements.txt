@@ -1,0 +1,12 @@
+sentence-transformers
+groq                    
+scikit-learn            
+snowflake-connector-python
+pyspark
+delta-spark
+boto3
+dbt-snowflake
+streamlit
+plotly
+prefect
+python-dotenv
