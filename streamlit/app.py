@@ -116,6 +116,45 @@ with tab3:
         df_clusters[['cluster_label', 'cluster_summary', 'review_count']],
         use_container_width=True
     )
+    
+    st.subheader('レビュークラスタ分布（t-SNE）')
+    df_tsne = load('''
+        SELECT
+            t.tsne_x,
+            t.tsne_y,
+            t.cluster_label,
+            t.cluster_summary,
+            r.category_en
+        FROM tttc_clusters t
+        JOIN stg_reviews r ON t.review_id = r.review_id
+    ''')
+    fig_tsne = px.scatter(
+        df_tsne,
+        x='tsne_x',
+        y='tsne_y',
+        color='cluster_label',
+        hover_data={
+            'tsne_x': False,
+            'tsne_y': False,
+            'category_en': True,
+            'cluster_label': True,
+            'cluster_summary': True,
+        },
+        labels={
+            'tsne_x': '',
+            'tsne_y': '',
+            'category_en': 'カテゴリ',
+            'cluster_label': 'クラスタ',
+            'cluster_summary': '内容',
+        },
+        title='カテゴリ × クラスタの分布',
+    )
+    fig_tsne.update_layout(
+        legend_title_text='カテゴリ',
+        xaxis=dict(showticklabels=False),
+        yaxis=dict(showticklabels=False),
+    )
+    st.plotly_chart(fig_tsne, use_container_width=True)
 
 # ── Tab 4: 統合分析 ────────────────────────────────
 with tab4:

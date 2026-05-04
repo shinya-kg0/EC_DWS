@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.dirname(__file__))
 
 from fetch_reviews import fetch_reviews
-from embed import generate_embeddings
+from embed import generate_embeddings, reduce_dimensions
 from cluster import find_optimal_k, cluster_reviews
 from label import label_cluster
 from write_back import write_clusters_to_snowflake
@@ -17,6 +17,10 @@ def run(limit: int = 300):
     # 2. Embedding
     print('--- Step 2: Generating embeddings ---')
     embeddings = generate_embeddings(df['review_text'].tolist())
+    print('--- Step 2.5: Reducing dimensions with t-SNE ---')
+    coords = reduce_dimensions(embeddings)
+    df['tsne_x'] = coords[:, 0]
+    df['tsne_y'] = coords[:, 1]
 
     # 3. クラスタリング
     print('--- Step 3: Clustering ---')
@@ -41,4 +45,4 @@ def run(limit: int = 300):
     print('Pipeline complete!')
 
 if __name__ == '__main__':
-    run(limit=300)
+    run(limit=1000)

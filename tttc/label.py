@@ -16,8 +16,8 @@ def label_cluster(cluster_id: int, sample_texts: list) -> dict:
 
 出力形式（JSONのみ、説明不要）:
 {{
-  "label": "テーマ名（10文字以内）",
-  "summary": "共通する内容の要約（50文字以内）"
+  "label": "テーマ名（20文字以内）",
+  "summary": "このクラスタのレビューが共通して述べている内容、顧客の感情、具体的な不満や満足のポイントを100文字以内で説明してください"
 }}
 '''
     response = client.chat.completions.create(
