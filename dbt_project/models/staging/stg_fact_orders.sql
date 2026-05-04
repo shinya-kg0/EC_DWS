@@ -1,28 +1,32 @@
 with source as (
     select * from {{ source('raw', 'fact_orders') }}
+),
+
+flattened as (
+    select
+        VALUE:order_id::string               as order_id,
+        VALUE:customer_id::string            as customer_id,
+        VALUE:customer_unique_id::string     as customer_unique_id,
+        VALUE:order_status::string           as order_status,
+        VALUE:order_date::date               as order_date,
+        VALUE:order_month::int               as order_month,
+        VALUE:order_year::int                as order_year,
+        VALUE:order_purchase_timestamp::timestamp as order_purchase_timestamp,
+        VALUE:order_estimated_delivery_date::date as order_estimated_delivery_date,
+        VALUE:order_delivered_customer_date::date as order_delivered_customer_date,
+        VALUE:delivery_days::int             as delivery_days,
+        VALUE:is_delayed::boolean            as is_delayed,
+        VALUE:total_item_price::float        as total_item_price,
+        VALUE:total_freight_value::float     as total_freight_value,
+        VALUE:total_payment_value::float     as total_payment_value,
+        VALUE:primary_payment_type::string   as primary_payment_type,
+        VALUE:max_installments::int          as max_installments,
+        VALUE:item_count::int                as item_count,
+        VALUE:review_score::float            as review_score,
+        VALUE:has_comment::boolean           as has_comment,
+        VALUE:customer_state::string         as customer_state,
+        VALUE:customer_city::string          as customer_city
+    from source
 )
 
-select
-    "order_id"                        as order_id,
-    "customer_id"                     as customer_id,
-    "customer_unique_id"              as customer_unique_id,
-    "order_status"                    as order_status,
-    "order_date"                      as order_date,
-    "order_month"                     as order_month,
-    "order_year"                      as order_year,
-    "order_purchase_timestamp"        as order_purchase_timestamp,
-    "order_estimated_delivery_date"   as order_estimated_delivery_date,
-    "order_delivered_customer_date"   as order_delivered_customer_date,
-    "delivery_days"                   as delivery_days,
-    "is_delayed"                      as is_delayed,
-    "total_item_price"                as total_item_price,
-    "total_freight_value"             as total_freight_value,
-    "total_payment_value"             as total_payment_value,
-    "primary_payment_type"            as primary_payment_type,
-    "max_installments"                as max_installments,
-    "item_count"                      as item_count,
-    "review_score"                    as review_score,
-    "has_comment"                     as has_comment,
-    "customer_state"                  as customer_state,
-    "customer_city"                   as customer_city
-from source
+select * from flattened

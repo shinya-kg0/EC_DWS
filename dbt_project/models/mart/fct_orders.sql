@@ -1,5 +1,18 @@
+{{
+    config(
+        materialized='incremental',
+        unique_key='order_id',
+        incremental_strategy='merge',
+        on_schema_change='append_new_columns'
+    )
+}}
+
 with orders as (
     select * from {{ ref('stg_fact_orders') }}
+
+    {% if is_incremental() %}
+    where order_date > (select max(order_date) from {{ this }})
+    {% endif %}
 )
 
 select
