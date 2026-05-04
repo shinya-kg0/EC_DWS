@@ -75,7 +75,7 @@ python flows/ec_pipeline.py
 
 | カテゴリ | 技術 |
 |---------|------|
-| Lakehouse | Databricks + Delta Lake |
+| Lakehouse | ローカル PySpark + Delta Lake + S3 |
 | DWH | Snowflake |
 | データ変換 | dbt |
 | 分散処理 | PySpark |
@@ -85,4 +85,3 @@ python flows/ec_pipeline.py
 | クラスタリング | scikit-learn（KMeans） |
 | 次元削減 | scikit-learn（t-SNE） |
 | 可視化 | Streamlit + Plotly |
-| ストレージ | AWS S3 |
