@@ -1,7 +1,6 @@
 """
 gold_aggregation.py
 ==============================
-Silver Delta → Gold Parquet
 
 生成テーブル：
   1. fact_orders        … 注文×顧客×支払い結合ファクト（行レベル）
@@ -14,6 +13,7 @@ from dotenv import load_dotenv
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
+from delta.tables import DeltaTable
 
 load_dotenv()
 
@@ -43,10 +43,32 @@ def read_silver(table: str):
     return spark.read.format("delta").load(f"{SILVER}/{table}")
 
 
-def write_gold(df, table: str):
+def write_gold_merge(df, table: str, pk_cols: list):
     path = f"{GOLD}/{table}"
-    df.write.mode("overwrite").parquet(path)
-    print(f"[Gold] {table}: {df.count()} rows → s3")
+    merge_condition = " AND ".join(
+        [f"existing.{k} = incoming.{k}" for k in pk_cols]
+    )
+
+    if DeltaTable.isDeltaTable(spark, path):
+        # 増分: 既存行UPDATE + 新規行INSERT 
+        dt = DeltaTable.forPath(spark, path)
+        (
+            dt.alias("existing")
+            .merge(df.alias("incoming"), merge_condition)
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
+        print(f"[Gold] {table}: merged")
+    else:
+        # 初回: Deltaテーブルを新規作成
+        (
+            df.write
+            .format("delta")
+            .mode("overwrite")
+            .save(path)
+        )
+        print(f"[Gold] {table}: {df.count()} rows created (initial load)")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -149,7 +171,7 @@ def build_fact_orders():
         )
     )
 
-    write_gold(fact, "fact_orders")
+    write_gold_merge(fact, "fact_orders", ["order_id"])
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -213,31 +235,22 @@ def build_reviews_for_tttc():
         .orderBy("review_creation_date")
     )
 
-    write_gold(tttc, "reviews_for_tttc")
+    write_gold_merge(tttc, "reviews_for_tttc", ["review_id"])
 
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. dim_products
 #    order_items × products × category_translation の結合
-#    粒度：order_id × product_id（1注文に複数商品があれば複数行）
-#    dbt の agg_category_sales が fact_orders と JOIN して使う
+#    粒度：order_id × product_id（同一注文に同じ商品が複数行ある場合は集約）
 # ════════════════════════════════════════════════════════════════════════════
 def build_dim_products():
     items    = read_silver("order_items")
     products = read_silver("products")
     trans    = read_silver("product_category_name_translation")
 
-    dim = (
-        items
-        .select("order_id", "product_id", "price", "freight_value")
-        .join(
-            products.select(
-                "product_id",
-                "product_category_name",
-                "product_weight_g",
-                "product_photos_qty"),
-            "product_id", "left"
-        )
+    products_with_category = (
+        products
+        .select("product_id", "product_category_name")
         .join(trans, "product_category_name", "left")
         .withColumn(
             "category_en",
@@ -246,17 +259,23 @@ def build_dim_products():
                 F.col("product_category_name")
             )
         )
-        .select(
-            "order_id",
-            "product_id",
-            "product_category_name",
-            "category_en",
-            "price",
-            "freight_value",
+        .select("product_id", "product_category_name", "category_en")
+    )
+
+    dim = (
+        items
+        .select("order_id", "product_id", "price", "freight_value")
+        .join(products_with_category, "product_id", "left")
+        .groupBy("order_id", "product_id")
+        .agg(
+            F.sum("price").alias("price"),
+            F.sum("freight_value").alias("freight_value"),
+            F.first("product_category_name").alias("product_category_name"),
+            F.first("category_en").alias("category_en"),
         )
     )
 
-    write_gold(dim, "dim_products")
+    write_gold_merge(dim, "dim_products", ["order_id", "product_id"])
 
 
 # ── 実行 ────────────────────────────────────────────────────────────────────

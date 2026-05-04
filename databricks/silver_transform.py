@@ -3,10 +3,10 @@ from dotenv import load_dotenv
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType, FloatType, DoubleType
+from delta.tables import DeltaTable
 
 load_dotenv()
 
-# Spark Session
 spark = (
     SparkSession.builder
     .appName("Silver Transform")
@@ -33,10 +33,33 @@ def read_bronze(table: str):
     return spark.read.format("delta").load(f"{BRONZE}/{table}")
 
 
-def write_silver(df, table: str):
+def write_silver_merge(df, table: str, pk_cols: list):
     path = f"{SILVER}/{table}"
-    df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(path)
-    print(f"[Silver] {table}: {df.count()} rows → s3")
+    merge_condition = " AND ".join(
+        [f"existing.{k} = incoming.{k}" for k in pk_cols]
+    )
+
+    if DeltaTable.isDeltaTable(spark, path):
+        # 増分: 既存行UPDATE + 新規行INSERT 
+        dt = DeltaTable.forPath(spark, path)
+        (
+            dt.alias("existing")
+            .merge(df.alias("incoming"), merge_condition)
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
+        print(f"[Silver] {table}: merged")
+    else:
+        # 初回: Deltaテーブルを新規作成 
+        (
+            df.write
+            .format("delta")
+            .mode("overwrite")
+            .option("overwriteSchema", "true")
+            .save(path)
+        )
+        print(f"[Silver] {table}: {df.count()} rows created (initial load)")
 
 
 # ── 1. orders ───────────────────────────────────────────────────────────────
@@ -65,7 +88,7 @@ def transform_orders():
         (F.col("order_approved_at") >= F.col("order_purchase_timestamp"))
     )
 
-    write_silver(df, "orders")
+    write_silver_merge(df, "orders", ["order_id"])
 
 
 # ── 2. order_items ──────────────────────────────────────────────────────────
@@ -83,7 +106,7 @@ def transform_order_items():
         .filter(F.col("freight_value") >= 0)
     )
 
-    write_silver(df, "order_items")
+    write_silver_merge(df, "order_items", ["order_id", "order_item_id"])
 
 
 # ── 3. customers ────────────────────────────────────────────────────────────
@@ -102,7 +125,7 @@ def transform_customers():
         .withColumn("customer_city", F.lower(F.trim(F.col("customer_city"))))
     )
 
-    write_silver(df, "customers")
+    write_silver_merge(df, "customers", ["customer_id"])
 
 
 # ── 4. products ─────────────────────────────────────────────────────────────
@@ -133,10 +156,10 @@ def transform_products():
         )
         .withColumn("product_weight_g",
                     F.when(F.col("product_weight_g") > 0,
-                            F.col("product_weight_g")))
+                           F.col("product_weight_g")))
     )
 
-    write_silver(df, "products")
+    write_silver_merge(df, "products", ["product_id"])
 
 
 # ── 5. sellers ──────────────────────────────────────────────────────────────
@@ -155,7 +178,7 @@ def transform_sellers():
         .withColumn("seller_city", F.lower(F.trim(F.col("seller_city"))))
     )
 
-    write_silver(df, "sellers")
+    write_silver_merge(df, "sellers", ["seller_id"])
 
 
 # ── 6. order_payments ───────────────────────────────────────────────────────
@@ -175,7 +198,7 @@ def transform_order_payments():
         .filter(F.col("payment_value") > 0)
     )
 
-    write_silver(df, "order_payments")
+    write_silver_merge(df, "order_payments", ["order_id", "payment_sequential"])
 
 
 # ── 7. order_reviews ────────────────────────────────────────────────────────
@@ -201,7 +224,7 @@ def transform_order_reviews():
                     F.col("review_comment_message").isNotNull())
     )
 
-    write_silver(df, "order_reviews")
+    write_silver_merge(df, "order_reviews", ["review_id"])
 
 
 # ── 8. geolocation ──────────────────────────────────────────────────────────
@@ -211,8 +234,8 @@ def transform_geolocation():
     df = (
         df
         .dropDuplicates(["geolocation_zip_code_prefix",
-                        "geolocation_lat",
-                        "geolocation_lng"])
+                         "geolocation_lat",
+                         "geolocation_lng"])
         .dropna(subset=["geolocation_zip_code_prefix",
                         "geolocation_lat",
                         "geolocation_lng"])
@@ -227,14 +250,18 @@ def transform_geolocation():
         .filter(F.col("geolocation_lat").between(-35.0, 5.5))
         .filter(F.col("geolocation_lng").between(-74.0, -34.0))
         .groupBy("geolocation_zip_code_prefix", "geolocation_city",
-                "geolocation_state")
+                 "geolocation_state")
         .agg(
             F.percentile_approx("geolocation_lat", 0.5).alias("geolocation_lat"),
             F.percentile_approx("geolocation_lng", 0.5).alias("geolocation_lng"),
         )
     )
 
-    write_silver(df, "geolocation")
+    # geolocationはzip+city+stateの複合PKで管理
+    write_silver_merge(df, "geolocation",
+                       ["geolocation_zip_code_prefix",
+                        "geolocation_city",
+                        "geolocation_state"])
 
 
 # ── 9. product_category_name_translation ────────────────────────────────────
@@ -251,7 +278,8 @@ def transform_category_translation():
                     F.lower(F.trim(F.col("product_category_name_english"))))
     )
 
-    write_silver(df, "product_category_name_translation")
+    write_silver_merge(df, "product_category_name_translation",
+                       ["product_category_name"])
 
 
 if __name__ == "__main__":

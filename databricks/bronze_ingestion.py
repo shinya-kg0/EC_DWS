@@ -1,15 +1,16 @@
 import os
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
+from delta.tables import DeltaTable
 
 load_dotenv()
 
 AWS_ACCESS_KEY = os.environ['AWS_ACCESS_KEY_ID']
 AWS_SECRET_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 
-BUCKET       = 'ec-dwh-main'
-S3_INPUT     = f's3a://{BUCKET}/raw/olist/'
-S3_OUTPUT    = f's3a://{BUCKET}/bronze/delta/'
+BUCKET    = 'ec-dwh-main'
+S3_INPUT  = f's3a://{BUCKET}/raw/olist/'
+S3_OUTPUT = f's3a://{BUCKET}/bronze/delta/'
 
 spark = SparkSession.builder \
     .appName("bronze_ingestion") \
@@ -29,29 +30,57 @@ spark = SparkSession.builder \
 
 spark.sparkContext.setLogLevel("ERROR")
 
-TABLES = [
-    "olist_orders_dataset",
-    "olist_order_items_dataset",
-    "olist_customers_dataset",
-    "olist_products_dataset",
-    "olist_sellers_dataset",
-    "olist_order_payments_dataset",
-    "olist_order_reviews_dataset",
-    "olist_geolocation_dataset",
-    "product_category_name_translation",
-]
+PRIMARY_KEYS = {
+    "olist_orders_dataset":                  ["order_id"],
+    "olist_order_items_dataset":             ["order_id", "order_item_id"],
+    "olist_customers_dataset":               ["customer_id"],
+    "olist_products_dataset":                ["product_id"],
+    "olist_sellers_dataset":                 ["seller_id"],
+    "olist_order_payments_dataset":          ["order_id", "payment_sequential"],
+    "olist_order_reviews_dataset":           ["review_id"],
+    "olist_geolocation_dataset":             ["geolocation_zip_code_prefix",
+                                              "geolocation_lat",
+                                              "geolocation_lng"],
+    "product_category_name_translation":     ["product_category_name"],
+}
 
-for tbl in TABLES:
+TABLES = list(PRIMARY_KEYS.keys())
+
+
+def ingest_table(tbl: str, pks: list[str]):
+    path = f"{S3_OUTPUT}{tbl}/"
     df = spark.read.csv(
         f"{S3_INPUT}{tbl}.csv",
         header=True,
-        inferSchema=False
+        inferSchema=False,
     )
-    (df.write
-        .format("delta")
-        .mode("overwrite")
-        .save(f"{S3_OUTPUT}{tbl}/"))
-    print(f"[Bronze] {tbl}: {df.count()} rows to s3")
+
+    if DeltaTable.isDeltaTable(spark, path):
+        # 増分: 新規行のみINSERT
+        merge_condition = " AND ".join(
+            [f"existing.{k} = incoming.{k}" for k in pks]
+        )
+        dt = DeltaTable.forPath(spark, path)
+        (
+            dt.alias("existing")
+            .merge(df.alias("incoming"), merge_condition)
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
+        print(f"[Bronze] {tbl}: merged (new rows only)")
+    else:
+        # 初回: Deltaテーブルを新規作成
+        (
+            df.write
+            .format("delta")
+            .mode("overwrite")
+            .save(path)
+        )
+        print(f"[Bronze] {tbl}: {df.count()} rows created (initial load)")
+
+
+for tbl in TABLES:
+    ingest_table(tbl, PRIMARY_KEYS[tbl])
 
 spark.stop()
 print("Bronze done.")
