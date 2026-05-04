@@ -72,11 +72,30 @@ def tttc():
     _run(f'{PROJECT}/tttc/run_pipeline.py')
     print('=== TttC done ===')
 
+@task(name="Refresh Snowflake external tables", log_prints=True)
+def refresh_external_tables():
+    import snowflake.connector
+    conn = snowflake.connector.connect(
+        account   = os.environ['SNOWFLAKE_ACCOUNT'],
+        user      = os.environ['SNOWFLAKE_USER'],
+        password  = os.environ['SNOWFLAKE_PASSWORD'],
+        database  = 'ec_dwh',
+        schema    = 'raw',
+        warehouse = 'ec_dwh_wh',
+    )
+    cur = conn.cursor()
+    for table in ['fact_orders', 'reviews_for_tttc', 'dim_products']:
+        cur.execute(f'ALTER EXTERNAL TABLE raw.{table} REFRESH')
+        print(f'Refreshed: raw.{table}')
+    conn.close()
+
+
 @flow(name="EC Pipeline", log_prints=True)
 def ec_pipeline():
     bronze()
     silver()
     gold()
+    refresh_external_tables()
     dbt_run()
     dbt_test()
     tttc()
